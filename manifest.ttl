@@ -8,7 +8,7 @@
 	foaf:mbox "mailto:christian.masser@gmail.com" ;
 	rdfs:seeAlso <http://github.com/brainstar> .
 
-blv2:pan4
+<http://github.com/brainstar/lv2/pan4>
 	a lv2:Plugin ;
 	lv2:binary <pan4.so> ;
 	rdfs:seeAlso <pan4.ttl> .
