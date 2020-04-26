@@ -3,6 +3,7 @@
 #include <lvtk/plugin.hpp>
 
 #define PAN_URI "http://github.com/brainstar/lv2/pan4"
+const uint32_t BUFFER_SIZE = 10000;
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
@@ -21,31 +22,33 @@ public:
 			ear_dist = (float*) data;
 		}
 		else if (port == 3) {
-			input[0] = (float*) data;
+			alpha0 = (float*) data;
 		}
 		else if (port == 4) {
-			input[1] = (float*) data;
+			input[0] = (float*) data;
 		}
 		else if (port == 5) {
-			input[2] = (float*) data;
+			input[1] = (float*) data;
 		}
 		else if (port == 6) {
-			input[3] = (float*) data;
+			input[2] = (float*) data;
 		}
 		else if (port == 7) {
-			output[0] = (float*) data;
+			input[3] = (float*) data;
 		}
 		else if (port == 8) {
+			output[0] = (float*) data;
+		}
+		else if (port == 9) {
 			output[1] = (float*) data;
 		}
 	}
 
 	void activate() {
-		buffer_size = sample_rate / 10;
-		buffer_l.clear();
-		buffer_l.resize(buffer_size, 0.0);
-		buffer_r.clear();
-		buffer_r.resize(buffer_size, 0.0);
+		for (int i = 0; i < BUFFER_SIZE; i++) {
+			buffer_l[i] = 0.0;
+			buffer_r[i] = 0.0;
+		}
 		buffer_ptr = 0;
 	}
 
@@ -53,12 +56,16 @@ public:
 	}
 
 	void run(uint32_t nframes) {
-
 		// Update data if necessary
 		if (*radius != r_old
 			|| *player_dist != pdist_old
-			|| *ear_dist != edist_old) {
-			update_data(*radius, *player_dist, *ear_dist);
+			|| *ear_dist != edist_old
+			|| *alpha0 != a0_old) {
+			update_data(*radius, *player_dist, *ear_dist, *alpha0);
+			r_old = *radius;
+			pdist_old = *player_dist;
+			edist_old = *ear_dist;
+			a0_old = *alpha0;
 		}
 
 		// buffer_ptr <=> frame 0
@@ -73,18 +80,18 @@ public:
 			// Left side:
 			// Determine number of passes:
 			offset = buffer_ptr + samples_l[i];
-			if (offset > buffer_size) {
+			if (offset > BUFFER_SIZE) {
 				// Single pass, total overflow
 				passes = 1;
-				buffer_frame_start[0] = (buffer_ptr + samples_l[i]) - buffer_size;
+				buffer_frame_start[0] = (buffer_ptr + samples_l[i]) - BUFFER_SIZE;
 				input_frame_start[0] = 0;
 				input_frame_size[0] = nframes;
-			} else if (offset + nframes > buffer_size) {
+			} else if (offset + nframes > BUFFER_SIZE) {
 				// Dual pass, partial overflow
 				passes = 2;
 				buffer_frame_start[0] = offset;
 				input_frame_start[0] = 0;
-				input_frame_size[0] = buffer_size - offset;
+				input_frame_size[0] = BUFFER_SIZE - offset;
 				buffer_frame_start[1] = 0;
 				input_frame_start[1] = input_frame_size[0];
 				input_frame_size[1] = nframes - input_frame_size[0];
@@ -107,18 +114,18 @@ public:
 			// Right side:
 			// Determine number of passes:
 			offset = buffer_ptr + samples_r[i];
-			if (offset > buffer_size) {
+			if (offset > BUFFER_SIZE) {
 				// Single pass, total overflow
 				passes = 1;
-				buffer_frame_start[0] = (buffer_ptr + samples_r[i]) - buffer_size;
+				buffer_frame_start[0] = (buffer_ptr + samples_r[i]) - BUFFER_SIZE;
 				input_frame_start[0] = 0;
 				input_frame_size[0] = nframes;
-			} else if (offset + nframes > buffer_size) {
+			} else if (offset + nframes > BUFFER_SIZE) {
 				// Dual pass, partial overflow
 				passes = 2;
 				buffer_frame_start[0] = offset;
 				input_frame_start[0] = 0;
-				input_frame_size[0] = buffer_size - offset;
+				input_frame_size[0] = BUFFER_SIZE - offset;
 				buffer_frame_start[1] = 0;
 				input_frame_start[1] = input_frame_size[0];
 				input_frame_size[1] = nframes - input_frame_size[0];
@@ -140,8 +147,8 @@ public:
 		}
 
 		// Output buffer to stream
-		if (buffer_ptr + nframes > buffer_size) {
-			uint32_t frames_pass_1 = buffer_ptr + nframes - buffer_size;
+		if (buffer_ptr + nframes > BUFFER_SIZE) {
+			uint32_t frames_pass_1 = BUFFER_SIZE - buffer_ptr;
 			uint32_t frames_pass_2 = nframes - frames_pass_1;
 			// Pass 1
 			for (int f = 0; f < frames_pass_1; f++) {
@@ -165,20 +172,20 @@ public:
 			for (uint32_t f = 0; f < nframes; f++) {
 				output[0][f] = buffer_l[buffer_ptr];
 				output[1][f] = buffer_r[buffer_ptr];
-				buffer_l[f] = 0.f;
-				buffer_r[f] = 0.f;
+				buffer_l[buffer_ptr] = 0.f;
+				buffer_r[buffer_ptr] = 0.f;
 				buffer_ptr++;
 			}
 		}
 	}
 
-	void update_data(float r, float pdist, float eardist) {
+	void update_data(float r, float pdist, float eardist, float a0) {
 		// Define source count, fixed by plugin input size at compile time
 		const int COUNT = 4;
 
 		// Define angles
 		float alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
-		float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
+		// float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
 		float alpha_p[COUNT]; // Angle of individual sources [rad] (center = 0, right > 0)
 
 		// Calculate angles of individual sources
@@ -196,7 +203,7 @@ public:
 			}
 		}
 		// ...then add angle displacement.
-		for (int i = 0; i < COUNT; i++) alpha_p[i] += alpha0;
+		for (int i = 0; i < COUNT; i++) alpha_p[i] += a0;
 
 		double posx, posy, time_l, time_r;
 		double dist_l[COUNT];
@@ -239,19 +246,20 @@ private:
 	float* radius = NULL;
 	float* player_dist = NULL;
 	float* ear_dist = NULL;
+	float* alpha0 = NULL;
 
 	float r_old = 0;
 	float pdist_old = 0;
 	float edist_old = 0;
+	float a0_old = 0;
 	float sample_rate;
 	float v_air = 343.2;
 
 	int samples_l[4], samples_r[4];
 	float attenuation_l[4], attenuation_r[4];
-	std::vector<float> buffer_l;
-	std::vector<float> buffer_r;
+	float buffer_l[BUFFER_SIZE];
+	float buffer_r[BUFFER_SIZE];
 	uint32_t buffer_ptr;
-	uint32_t buffer_size;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);
