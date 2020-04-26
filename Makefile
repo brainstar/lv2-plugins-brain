@@ -7,7 +7,7 @@ $(BUNDLE): manifest.ttl pan4.ttl pan4.so
 	cp manifest.ttl pan4.ttl pan4.so $(BUNDLE)
 
 pan4.so:
-	g++ -shared -fPIC -DPIC pan4.cpp `pkg-config --cflags --libs lvtk-plugin-1` -o pan4.so
+	clang++ -Wall -ggdb -shared -fPIC -DPIC pan4.cpp `pkg-config --cflags --libs lvtk-2` -o pan4.so
 
 install: $(BUNDLE)
 	mkdir -p $(INSTALL_DIR)
