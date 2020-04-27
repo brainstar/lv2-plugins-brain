@@ -13,3 +13,8 @@
 	a lv2:Plugin ;
 	lv2:binary <pan4.so> ;
 	rdfs:seeAlso <pan4.ttl> .
+
+<http://github.com/brainstar/lv2/pan9>
+	a lv2:Plugin ;
+	lv2:binary <pan9.so> ;
+	rdfs:seeAlso <pan9.ttl> .
