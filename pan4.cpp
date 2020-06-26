@@ -162,16 +162,18 @@ public:
 		avg.resize(2);
 
 		for (int i = 0; i < 2; i++) {
-			delay[i].resize(CHANNELS, 0);
-			attenuation[i].resize(CHANNELS, 1.f);
+			delay[i].resize(CHANNELS);
+			attenuation[i].resize(CHANNELS);
 			avg[i].resize(CHANNELS);
 			for (int j = 0; j < CHANNELS; j++) {
-				avg[i][j].initialize(sample_rate, 4);
+				delay[i][j] = 0;
+				attenuation[i][j] = 1.f;
+				avg[i][j].initialize(sample_rate, 1);
 			}
 		}
 
-		inputBuffer.resize(CHANNELS, std::vector<float>(BUFFER_SIZE));
-		delayBuffer.resize(CHANNELS, 0);
+		inputBuffer = std::vector<std::vector<float> >(CHANNELS, std::vector<float>(BUFFER_SIZE, 0.f));
+		delayBuffer = std::vector<float> (CHANNELS, 0);
 	}
 
 	void connect_port(uint32_t port, void* data) {
@@ -223,24 +225,20 @@ public:
 	void deactivate() {
 	}
 
-	float getInterpolatedValue(int ch, float age) {
+	float getInterpolatedValue(int ch, float offset) {
+		float position;
 		int index1, index2;
 		float weight1, weight2;
 
 		// Determine correct address in ring buffer
-		age += generalBufferPointer;
-		if (age < 0) age += BUFFER_SIZE;
+		position = offset + generalBufferPointer;
 
-		// Determine corresponding indices (not yet overflow corrected)
-		index1 = age;
-		index2 = index1 + 1;
-
-		// Determine weight
-		weight2 = age - (float) index1;
+		// Determine corresponding indices and weights.
+		index1 = (int) position;
+		weight2 = position - (float) index1;
+		index1 %= BUFFER_SIZE;
+		index2 = (index1 + 1) % BUFFER_SIZE;
 		weight1 = 1.0 - weight2;
-
-		// Now correct overflow
-		if (index2 == BUFFER_SIZE) index2 = 0;
 
 		return inputBuffer[ch][index1] * weight1 + inputBuffer[ch][index2] * weight2;
 	}
@@ -290,8 +288,8 @@ public:
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += inputBuffer[ch][(generalBufferPointer + f + b * batchsize) % BUFFER_SIZE];
-						//value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
+						value += getInterpolatedValue(ch, (f + b * batchsize));
+						// value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
 					output[i][f + b * batchsize] = value;
 				}
