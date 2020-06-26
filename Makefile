@@ -2,7 +2,7 @@ BUNDLE = lv2brain-pan.lv2
 INSTALL_DIR = /home/anachromium/.lv2
 
 CC = clang++
-CFLAGS = -g -Wall -shared -fPIC -DPIC
+CFLAGS = -fdenormal-fp-math=positive-zero -g -Wall -shared -fPIC -DPIC 
 
 all: $(BUNDLE)
 

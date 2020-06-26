@@ -1,3 +1,8 @@
+//To enable DAZ
+#include <pmmintrin.h>
+//To enable FTZ
+#include <xmmintrin.h>
+
 #include <math.h>
 #include <vector>
 #include <lvtk/plugin.hpp>
@@ -120,7 +125,7 @@ public:
 	}
 
 	int getBatchSize() {
-		return size;
+		return divider;
 	}
 
 private:
@@ -135,6 +140,8 @@ private:
 class Pan : public lvtk::Plugin<Pan> {
 public:
 	Pan(const lvtk::Args &args) : Plugin(args) {
+		_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+		_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 		sample_rate = static_cast<float> (args.sample_rate);
 
 		// Take values from ttl file
@@ -164,7 +171,6 @@ public:
 		}
 
 		inputBuffer.resize(CHANNELS, std::vector<float>(BUFFER_SIZE));
-		inputBufferPtr.resize(CHANNELS, 0);
 		delayBuffer.resize(CHANNELS, 0);
 	}
 
@@ -207,11 +213,11 @@ public:
 			for (int i = 0; i < BUFFER_SIZE; i++) {
 				inputBuffer[j][i] = 0;
 			}
-			inputBufferPtr[j] = 0;
 			for (int i = 0; i < 2; i++) {
 				avg[i][j].clean();
 			}
 		}
+		generalBufferPointer = 0;
 	} 
 
 	void deactivate() {
@@ -222,8 +228,8 @@ public:
 		float weight1, weight2;
 
 		// Determine correct address in ring buffer
-		if (age > generalBufferPointer) age = generalBufferPointer + BUFFER_SIZE - age;
-		else age = generalBufferPointer - age;
+		age += generalBufferPointer;
+		if (age < 0) age += BUFFER_SIZE;
 
 		// Determine corresponding indices (not yet overflow corrected)
 		index1 = age;
@@ -237,7 +243,6 @@ public:
 		if (index2 == BUFFER_SIZE) index2 = 0;
 
 		return inputBuffer[ch][index1] * weight1 + inputBuffer[ch][index2] * weight2;
-
 	}
 
 	void run(uint32_t nframes) {
@@ -260,15 +265,15 @@ public:
 
 		// Step 1: Buffer input
 		for (int ch = 0; ch < CHANNELS; ch++) {
-			if (inputBufferPtr[ch] + nframes < BUFFER_SIZE) {
-				for (int i = 0; i < nframes; i++) inputBuffer[ch][inputBufferPtr[ch] + i] = input[ch][i];
-				inputBufferPtr[ch] += nframes;
+			// Is there an overflow?
+			if (generalBufferPointer + nframes < BUFFER_SIZE) {
+				// If not: simply copy all the elements
+				for (int i = 0; i < nframes; i++) inputBuffer[ch][generalBufferPointer + i] = input[ch][i];
 			} else {
-				int offset = BUFFER_SIZE - inputBufferPtr[ch];
-				for (int i = 0; i < offset; i++) inputBuffer[ch][inputBufferPtr[ch] + i] = input[ch][i];
+				int offset = BUFFER_SIZE - generalBufferPointer;
+				for (int i = 0; i < offset; i++) inputBuffer[ch][generalBufferPointer + i] = input[ch][i];
 				int offset2 = nframes - offset;
 				for (int i = 0; i < offset2; i++) inputBuffer[ch][i] = inputBuffer[ch][offset + i];
-				inputBufferPtr[ch] = offset2;
 			}
 		}
 
@@ -285,7 +290,8 @@ public:
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
+						value += inputBuffer[ch][(generalBufferPointer + f + b * batchsize) % BUFFER_SIZE];
+						//value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
 					output[i][f + b * batchsize] = value;
 				}
@@ -379,7 +385,6 @@ private:
 	std::vector<std::vector<SampleAverager> > avg;
 
 	std::vector<std::vector<float> > inputBuffer;
-	std::vector<int> inputBufferPtr;
 
 	std::vector<float> delayBuffer;
 
