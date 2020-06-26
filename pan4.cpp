@@ -25,6 +25,17 @@ public:
 		rest = 0;
 	}
 
+	void clean() {
+		for (int i = 0; i < size; i++) {
+			samples_data[i] = 0;
+			samples_sum[i] = 0;
+			samples_sum_reduced[i] = 0;
+		}
+		fillPtr = 0;
+		readPtr = 0;
+		rest = 0;
+	}
+
 	void pushData(int value, int nframes) {
 		// Step 1: First check, if there are enough elements to work with
 		if (nframes + rest < divider) {
@@ -45,7 +56,7 @@ public:
 		}
 
 		// Step 3
-		// Caculate amount of samples and resulting rest
+		// Caculate amount of delay and resulting rest
 		int fullSamplesCount = nframes / divider;
 		rest = nframes % divider;
 
@@ -103,10 +114,13 @@ public:
 		}
 	}
 
-	float getData(int &batchsize) {
+	float getData() {
 		if (readPtr >= size) readPtr -= size;
-		batchsize = size;
 		return samples_sum_reduced[readPtr++];
+	}
+
+	int getBatchSize() {
+		return size;
 	}
 
 private:
@@ -122,12 +136,7 @@ class Pan : public lvtk::Plugin<Pan> {
 public:
 	Pan(const lvtk::Args &args) : Plugin(args) {
 		sample_rate = static_cast<float> (args.sample_rate);
-		samples.resize(2);
-		attenuation.resize(2);
-		for (int i = 0; i < 2; i++) {
-			samples[i].resize(CHANNELS, 0);
-			attenuation[i].resize(CHANNELS, 1.f);
-		}
+
 		// Take values from ttl file
 		// Max. signal path: max. radius + max. ear distance
 		// Max. dealy = max. sig. path / v_air
@@ -135,15 +144,28 @@ public:
 		// Buffer size > max. sample delay
 		// Here: double of max. sample delay
 		BUFFER_SIZE = ((20.0 + 1.0) / v_air) / (1.0 / sample_rate) * 2;
-		buffer_l.resize(BUFFER_SIZE);
-		buffer_r.resize(BUFFER_SIZE);
+		r_target = 5.;
+		pdist_target = 1.;
+		edist_target = 0.149;
+		a0_target = 0.f;
+		v_air = 343.2;
+
+		delay.resize(2);
+		attenuation.resize(2);
 		avg.resize(2);
+
 		for (int i = 0; i < 2; i++) {
+			delay[i].resize(CHANNELS, 0);
+			attenuation[i].resize(CHANNELS, 1.f);
 			avg[i].resize(CHANNELS);
 			for (int j = 0; j < CHANNELS; j++) {
 				avg[i][j].initialize(sample_rate, 4);
 			}
 		}
+
+		inputBuffer.resize(CHANNELS, std::vector<float>(BUFFER_SIZE));
+		inputBufferPtr.resize(CHANNELS, 0);
+		delayBuffer.resize(CHANNELS, 0);
 	}
 
 	void connect_port(uint32_t port, void* data) {
@@ -180,14 +202,42 @@ public:
 	}
 
 	void activate() {
-		for (int i = 0; i < BUFFER_SIZE; i++) {
-			buffer_l[i] = 0.0;
-			buffer_r[i] = 0.0;
+		// Clean buffer
+		for (int j = 0; j < CHANNELS; j++) {
+			for (int i = 0; i < BUFFER_SIZE; i++) {
+				inputBuffer[j][i] = 0;
+			}
+			inputBufferPtr[j] = 0;
+			for (int i = 0; i < 2; i++) {
+				avg[i][j].clean();
+			}
 		}
-		buffer_ptr = 0;
 	} 
 
 	void deactivate() {
+	}
+
+	float getInterpolatedValue(int ch, float age) {
+		int index1, index2;
+		float weight1, weight2;
+
+		// Determine correct address in ring buffer
+		if (age > generalBufferPointer) age = generalBufferPointer + BUFFER_SIZE - age;
+		else age = generalBufferPointer - age;
+
+		// Determine corresponding indices (not yet overflow corrected)
+		index1 = age;
+		index2 = index1 + 1;
+
+		// Determine weight
+		weight2 = age - (float) index1;
+		weight1 = 1.0 - weight2;
+
+		// Now correct overflow
+		if (index2 == BUFFER_SIZE) index2 = 0;
+
+		return inputBuffer[ch][index1] * weight1 + inputBuffer[ch][index2] * weight2;
+
 	}
 
 	void run(uint32_t nframes) {
@@ -204,45 +254,45 @@ public:
 		}
 
 		for (int i = 0; i < CHANNELS; i++) {
-			avg[0][i].pushData(samples[0][i], nframes);
-			avg[1][i].pushData(samples[1][i], nframes);
+			avg[0][i].pushData(delay[0][i], nframes);
+			avg[1][i].pushData(delay[1][i], nframes);
 		}
 
-		// buffer_ptr <=> frame 0
-		for (int i = 0; i < 4; i++) {
+		// Step 1: Buffer input
+		for (int ch = 0; ch < CHANNELS; ch++) {
+			if (inputBufferPtr[ch] + nframes < BUFFER_SIZE) {
+				for (int i = 0; i < nframes; i++) inputBuffer[ch][inputBufferPtr[ch] + i] = input[ch][i];
+				inputBufferPtr[ch] += nframes;
+			} else {
+				int offset = BUFFER_SIZE - inputBufferPtr[ch];
+				for (int i = 0; i < offset; i++) inputBuffer[ch][inputBufferPtr[ch] + i] = input[ch][i];
+				int offset2 = nframes - offset;
+				for (int i = 0; i < offset2; i++) inputBuffer[ch][i] = inputBuffer[ch][offset + i];
+				inputBufferPtr[ch] = offset2;
+			}
 		}
 
-		// Output buffer to stream
-		if (buffer_ptr + nframes > BUFFER_SIZE) {
-			uint32_t frames_pass_1 = BUFFER_SIZE - buffer_ptr;
-			uint32_t frames_pass_2 = nframes - frames_pass_1;
-			// Pass 1
-			for (int f = 0; f < frames_pass_1; f++) {
-				output[0][f] = buffer_l[buffer_ptr];
-				output[1][f] = buffer_r[buffer_ptr];
-				buffer_l[buffer_ptr] = 0.f;
-				buffer_r[buffer_ptr] = 0.f;
-				buffer_ptr++;
-			}
-			// Pass 2
-			buffer_ptr = 0;
-			for (int f = 0; f < frames_pass_2; f++) {
-				output[0][frames_pass_1 + f] = buffer_l[buffer_ptr];
-				output[1][frames_pass_1 + f] = buffer_r[buffer_ptr];
-				buffer_l[buffer_ptr] = 0.f;
-				buffer_r[buffer_ptr] = 0.f;
-				buffer_ptr++;
-			}
-		} else {
-			// Single pass
-			for (uint32_t f = 0; f < nframes; f++) {
-				output[0][f] = buffer_l[buffer_ptr];
-				output[1][f] = buffer_r[buffer_ptr];
-				buffer_l[buffer_ptr] = 0.f;
-				buffer_r[buffer_ptr] = 0.f;
-				buffer_ptr++;
+		// Step 2: Output
+		int batchsize, batches;
+		float value;
+		for (int i = 0; i < 2; i++) {
+			batchsize = avg[i][0].getBatchSize();
+			batches = nframes / batchsize;
+			for (int b = 0; b < batches; b++) {
+				// Fill delay buffer
+				for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].getData();
+				for (int f = 0; f < batchsize; f++) {
+					value = 0.f;
+					// Get every frame from the right buffer
+					for (int ch = 0; ch < CHANNELS; ch++) {
+						value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
+					}
+					output[i][f + b * batchsize] = value;
+				}
 			}
 		}
+		generalBufferPointer += nframes;
+		generalBufferPointer %= BUFFER_SIZE;
 	}
 
 	void update_data(float r, float pdist, float eardist, float a0) {
@@ -295,8 +345,8 @@ public:
 			// Calculate sample delay
 			time_l = dist_l[i] / v_air;
 			time_r = dist_r[i] / v_air;
-			samples[0][i] = (int) round(time_l / (1.0 / sample_rate));
-			samples[1][i] = (int) round(time_r / (1.0 / sample_rate));
+			delay[0][i] = (int) round(time_l / (1.0 / sample_rate));
+			delay[1][i] = (int) round(time_r / (1.0 / sample_rate));
 		}
 
 		// Normalize attenuation
@@ -308,6 +358,8 @@ public:
 	}
 
 private:
+	int BUFFER_SIZE;
+
 	float* input[4] { 0, 0, 0, 0 };
 	float* output[2] { 0, 0 };
 	float* radius = NULL;
@@ -322,13 +374,16 @@ private:
 	float sample_rate;
 	float v_air = 343.2;
 
-	std::vector<std::vector<int> > samples;
+	std::vector<std::vector<int> > delay;
 	std::vector<std::vector<float> > attenuation;
-	std::vector<float> buffer_l;
-	std::vector<float> buffer_r;
-	uint32_t buffer_ptr;
-	int BUFFER_SIZE;
 	std::vector<std::vector<SampleAverager> > avg;
+
+	std::vector<std::vector<float> > inputBuffer;
+	std::vector<int> inputBufferPtr;
+
+	std::vector<float> delayBuffer;
+
+	int generalBufferPointer;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);
