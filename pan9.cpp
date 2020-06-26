@@ -3,12 +3,21 @@
 #include <lvtk/plugin.hpp>
 
 #define PAN_URI "http://github.com/brainstar/lv2/pan9"
-const uint32_t BUFFER_SIZE = 10000;
+const int CHANNELS = 9;
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
 	Pan(const lvtk::Args &args) : Plugin(args) {
 		sample_rate = static_cast<float> (args.sample_rate);
+		// Take values from ttl file
+		// Max. signal path: max. radius + max. ear distance
+		// Max. dealy = max. sig. path / v_air
+		// Max. sample delay = max. delay / duration of single sample
+		// Buffer size > max. sample delay
+		// Here: double of max. sample delay
+		BUFFER_SIZE = ((20.0 + 1.0) / v_air) / (1.0 / sample_rate) * 2;
+		buffer_l.resize(BUFFER_SIZE);
+		buffer_r.resize(BUFFER_SIZE);
 	}
 
 	void connect_port(uint32_t port, void* data) {
@@ -25,37 +34,37 @@ public:
 			alpha0 = (float*) data;
 		}
 		else if (port == 4) {
-			input[0] = (float*) data;
-		}
-		else if (port == 5) {
-			input[1] = (float*) data;
-		}
-		else if (port == 6) {
-			input[2] = (float*) data;
-		}
-		else if (port == 7) {
-			input[3] = (float*) data;
-		}
-		else if (port == 8) {
-			input[4] = (float*) data;
-		}
-		else if (port == 9) {
-			input[5] = (float*) data;
-		}
-		else if (port == 10) {
-			input[6] = (float*) data;
-		}
-		else if (port == 11) {
-			input[7] = (float*) data;
-		}
-		else if (port == 12) {
-			input[8] = (float*) data;
-		}
-		else if (port == 13) {
 			output[0] = (float*) data;
 		}
-		else if (port == 14) {
+		else if (port == 5) {
 			output[1] = (float*) data;
+		}
+		else if (port == 6) {
+			input[0] = (float*) data;
+		}
+		else if (port == 7) {
+			input[1] = (float*) data;
+		}
+		else if (port == 8) {
+			input[2] = (float*) data;
+		}
+		else if (port == 9) {
+			input[3] = (float*) data;
+		}
+		else if (port == 10) {
+			input[4] = (float*) data;
+		}
+		else if (port == 11) {
+			input[5] = (float*) data;
+		}
+		else if (port == 12) {
+			input[6] = (float*) data;
+		}
+		else if (port == 13) {
+			input[7] = (float*) data;
+		}
+		else if (port == 14) {
+			input[8] = (float*) data;
 		}
 	}
 
@@ -72,15 +81,15 @@ public:
 
 	void run(uint32_t nframes) {
 		// Update data if necessary
-		if (*radius != r_old
-			|| *player_dist != pdist_old
-			|| *ear_dist != edist_old
-			|| *alpha0 != a0_old) {
+		if (*radius != r_target
+			|| *player_dist != pdist_target
+			|| *ear_dist != edist_target
+			|| *alpha0 != a0_target) {
 			update_data(*radius, *player_dist, *ear_dist, *alpha0);
-			r_old = *radius;
-			pdist_old = *player_dist;
-			edist_old = *ear_dist;
-			a0_old = *alpha0;
+			r_target = *radius;
+			pdist_target = *player_dist;
+			edist_target = *ear_dist;
+			a0_target = *alpha0;
 		}
 
 		// buffer_ptr <=> frame 0
@@ -91,7 +100,7 @@ public:
 		uint32_t buffer_frame_start[2];
 		uint32_t input_frame_start[2];
 		uint32_t input_frame_size[2];
-		for (int i = 0; i < 9; i++) {
+		for (int i = 0; i < CHANNELS; i++) {
 			// Left side:
 			// Determine number of passes:
 			offset = buffer_ptr + samples_l[i];
@@ -195,38 +204,41 @@ public:
 	}
 
 	void update_data(float r, float pdist, float eardist, float a0) {
-		// TODO: Ensure sane choices!
-		// Define source count, fixed by plugin input size at compile time
-		const int COUNT = 9;
-
+		// Safety check 1: player distance can't be > 2*r
+		float alpha;
 		// Define angles
-		float alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
+		if (pdist > 2 * r) {
+			pdist = 2 * r;
+			alpha = 2 * M_PI;
+		} else {
+			alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
+		}
 		// float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
-		float alpha_p[COUNT]; // Angle of individual sources [rad] (center = 0, right > 0)
+		float alpha_p[CHANNELS]; // Angle of individual sources [rad] (center = 0, right > 0)
 
 		// Calculate angles of individual sources
 		// First for symmetrical setup...
-		if (COUNT % 2 == 0) {
-			for (int i = 0; i < COUNT / 2; i++) {
-				alpha_p[(COUNT / 2) + i] = (0.5f + i) * alpha;
-				alpha_p[(COUNT / 2) - (1 + i)] = -alpha_p[(COUNT / 2) + i];
+		if (CHANNELS % 2 == 0) {
+			for (int i = 0; i < CHANNELS / 2; i++) {
+				alpha_p[(CHANNELS / 2) + i] = (0.5f + i) * alpha;
+				alpha_p[(CHANNELS / 2) - (1 + i)] = -alpha_p[(CHANNELS / 2) + i];
 			}
 		} else {
-			alpha_p[(COUNT + 1) / 2] = 0.f;
-			for (int i = 1; i < (COUNT + 1) / 2; i++) {
-				alpha_p[(COUNT - 1) / 2 + i] = alpha * i; 
-				alpha_p[(COUNT - 1) / 2 - i] = -alpha_p[(COUNT - 1) / 2 + i];
+			alpha_p[(CHANNELS - 1) / 2] = 0.f;
+			for (int i = 1; i < (CHANNELS + 1) / 2; i++) {
+				alpha_p[(CHANNELS - 1) / 2 + i] = alpha * i; 
+				alpha_p[(CHANNELS - 1) / 2 - i] = -alpha_p[(CHANNELS - 1) / 2 + i];
 			}
 		}
 		// ...then add angle displacement.
-		for (int i = 0; i < COUNT; i++) alpha_p[i] += a0;
+		for (int i = 0; i < CHANNELS; i++) alpha_p[i] += a0;
 
 		double posx, posy, time_l, time_r;
-		double dist_l[COUNT];
-		double dist_r[COUNT];
+		double dist_l[CHANNELS];
+		double dist_r[CHANNELS];
 		double attenuation = 1.0;
 
-		for (int i = 0; i < COUNT; i++) {
+		for (int i = 0; i < CHANNELS; i++) {
 			// Calculate position of source
 			posx = r * sin(alpha_p[i]);
 			posy = r * cos(alpha_p[i]);
@@ -250,32 +262,47 @@ public:
 
 		// Normalize attenuation
 		attenuation = 1.f / attenuation;
-		for (int i = 0; i < COUNT; i++) {
+		for (int i = 0; i < CHANNELS; i++) {
 			attenuation_l[i] *= attenuation;
 			attenuation_r[i] *= attenuation;
 		}
 	}
 
+	static bool getInterpolatedFrame(float* source, int nframes, float i, float &sample) {
+		if (i > (nframes - 1)) return false;
+		if (i == (nframes - 1)) {
+			sample = source[nframes - 1];
+			return true;
+		}
+
+		int baseIndex = i;
+		float scalar = i - baseIndex;
+		sample = source[baseIndex] * scalar + source[baseIndex + 1] * (1.0 - scalar);
+		return true;
+	}
+
 private:
-	float* input[9] { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	// Adapt input initialization for channel count change
+	float* input[CHANNELS] { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 	float* output[2] { 0, 0 };
 	float* radius = NULL;
 	float* player_dist = NULL;
 	float* ear_dist = NULL;
 	float* alpha0 = NULL;
 
-	float r_old = 0;
-	float pdist_old = 0;
-	float edist_old = 0;
-	float a0_old = 0;
+	float r_target = 5;
+	float pdist_target = 1;
+	float edist_target = 0.149;
+	float a0_target = 0;
 	float sample_rate;
-	float v_air = 343.2;
+	float v_air = 343.2; // sonic velocity in air [m/s]
 
-	int samples_l[9], samples_r[9];
-	float attenuation_l[9], attenuation_r[9];
-	float buffer_l[BUFFER_SIZE];
-	float buffer_r[BUFFER_SIZE];
+	int samples_l[CHANNELS], samples_r[CHANNELS];
+	float attenuation_l[CHANNELS], attenuation_r[CHANNELS];
+	std::vector<float> buffer_l;
+	std::vector<float> buffer_r;
 	uint32_t buffer_ptr;
+	int BUFFER_SIZE;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);
