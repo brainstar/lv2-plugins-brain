@@ -3,12 +3,145 @@
 #include <lvtk/plugin.hpp>
 
 #define PAN_URI "http://github.com/brainstar/lv2/pan4"
-const uint32_t BUFFER_SIZE = 10000;
+const int CHANNELS = 4;
+
+class SampleAverager
+{
+public:
+	SampleAverager() {}
+	~SampleAverager() {}
+
+	void initialize(int framerate, int divider) {
+		// Set Framerate, used for extracting the values
+		frate = framerate;
+		// Only save every x-th value, interpolation on extraction
+		this->divider = divider;
+		// size of divider, should divide framerate;
+		size = frate / divider;
+
+		samples_data.resize(size, 0);
+		samples_sum.resize(size, 0);
+		samples_sum_reduced.resize(size, 0.f);
+		rest = 0;
+	}
+
+	void pushData(int value, int nframes) {
+		// Step 1: First check, if there are enough elements to work with
+		if (nframes + rest < divider) {
+			rest += nframes;
+			return;
+		}
+
+		// Step 2: If there's a rest, handle it before
+		if (rest) {
+			// (nframes + rest) - divider
+			nframes -= (divider - rest);
+			samples_sum[fillPtr] = samples_sum[fillPtr == 0 ? (size - 1) : fillPtr]
+				- samples_data[fillPtr] + value;
+			samples_data[fillPtr] = value;
+			samples_sum_reduced[fillPtr] = (float) samples_sum[fillPtr] / size;
+			fillPtr++;
+			if (fillPtr == size) fillPtr = 0;
+		}
+
+		// Step 3
+		// Caculate amount of samples and resulting rest
+		int fullSamplesCount = nframes / divider;
+		rest = nframes % divider;
+
+		// No full sapmles? Abort.
+		if (!fullSamplesCount) return;
+
+		// 3.a) First check if fillPtr == 0
+		if (fillPtr == 0) {
+			samples_sum[0] = samples_sum[size - 1]
+				- samples_data[0] + value;
+			samples_data[0] = value;
+			samples_sum_reduced[0] = (float) samples_sum[0] / size;
+			fillPtr = 1;
+			fullSamplesCount--;
+		}
+
+		// 3.b) Single or double pass?
+		if (fillPtr + fullSamplesCount < size) {
+			// 3.c1) Single pass
+			for (int i = fillPtr; i < fillPtr + fullSamplesCount; i++) {
+				samples_sum[i] = samples_sum[i - 1]
+					- samples_data[i] + value;
+				samples_data[i] = value;
+				samples_sum_reduced[i] = (float) samples_sum[i] / size;
+			}
+			fillPtr += fullSamplesCount;
+		} else {
+			// 3.c2) Double pass: TODO
+			// Calculate frame count for second pass
+			fullSamplesCount -= (size - fillPtr);
+			// Fill in frames from [fillPtr, size[
+			for (int i = fillPtr; i < size; i++) {
+				samples_sum[i] = samples_sum[i - 1]
+					- samples_data[i] + value;
+				samples_data[i] = value;
+				samples_sum_reduced[i] = (float) samples_sum[i] / size;
+			}
+			// Fill in the 0
+			samples_sum[0] = samples_sum[size - 1]
+				- samples_data[0] + value;
+			samples_data[0] = value;
+			samples_sum_reduced[0] = (float) samples_sum[0] / size;
+			fillPtr = 1;
+
+			// Fill in frames from [1, fullSamplesCount[
+			for (int i = fillPtr; i < fullSamplesCount; i++) {
+				samples_sum[i] = samples_sum[i - 1]
+					- samples_data[i] + value;
+				samples_data[i] = value;
+				samples_sum_reduced[i] = (float) samples_sum[i] / size;
+			}
+
+			// Reset fillPtr
+			fillPtr = fullSamplesCount;
+		}
+	}
+
+	float getData(int &batchsize) {
+		if (readPtr >= size) readPtr -= size;
+		batchsize = size;
+		return samples_sum_reduced[readPtr++];
+	}
+
+private:
+	std::vector<int> samples_data;
+	std::vector<long> samples_sum;
+	std::vector<float> samples_sum_reduced;
+	int frate, divider, size;
+	int rest = 0;
+	int fillPtr = 0, readPtr = 0;
+};
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
 	Pan(const lvtk::Args &args) : Plugin(args) {
 		sample_rate = static_cast<float> (args.sample_rate);
+		for (int i = 0; i < 4; i++) {
+			samples_l[i] = samples_r[i] = 0;
+			attenuation_l[i] = attenuation_r[i] = 1.f;
+		}
+		// Take values from ttl file
+		// Max. signal path: max. radius + max. ear distance
+		// Max. dealy = max. sig. path / v_air
+		// Max. sample delay = max. delay / duration of single sample
+		// Buffer size > max. sample delay
+		// Here: double of max. sample delay
+		BUFFER_SIZE = ((20.0 + 1.0) / v_air) / (1.0 / sample_rate) * 2;
+		buffer_l.resize(BUFFER_SIZE);
+		buffer_r.resize(BUFFER_SIZE);
+		avg.resize(2);
+		for (int i = 0; i < 2; i++) {
+			avg[i].resize(CHANNELS);
+			for (int j = 0; j < CHANNELS; j++) {
+				avg[i][j].initialize(sample_rate, 4);
+			}
+		}
 	}
 
 	void connect_port(uint32_t port, void* data) {
@@ -50,22 +183,27 @@ public:
 			buffer_r[i] = 0.0;
 		}
 		buffer_ptr = 0;
-	}
+	} 
 
 	void deactivate() {
 	}
 
 	void run(uint32_t nframes) {
 		// Update data if necessary
-		if (*radius != r_old
-			|| *player_dist != pdist_old
-			|| *ear_dist != edist_old
-			|| *alpha0 != a0_old) {
+		if (*radius != r_target
+			|| *player_dist != pdist_target
+			|| *ear_dist != edist_target
+			|| *alpha0 != a0_target) {
 			update_data(*radius, *player_dist, *ear_dist, *alpha0);
-			r_old = *radius;
-			pdist_old = *player_dist;
-			edist_old = *ear_dist;
-			a0_old = *alpha0;
+			r_target = *radius;
+			pdist_target = *player_dist;
+			edist_target = *ear_dist;
+			a0_target = *alpha0;
+		}
+
+		for (int i = 0; i < CHANNELS; i++) {
+			avg[0][i].pushData(samples_l[i], nframes);
+			avg[1][i].pushData(samples_r[i], nframes);
 		}
 
 		// buffer_ptr <=> frame 0
@@ -77,6 +215,7 @@ public:
 		uint32_t input_frame_start[2];
 		uint32_t input_frame_size[2];
 		for (int i = 0; i < 4; i++) {
+			int dummy;
 			// Left side:
 			// Determine number of passes:
 			offset = buffer_ptr + samples_l[i];
@@ -104,10 +243,16 @@ public:
 			}
 
 			// Make passes
+			int dummycnt = 0;
 			for (int p = 0; p < passes; p++) {
 				for (int f = 0; f < input_frame_size[p]; f++) {
+					if (dummycnt == dummy) {
+						avg[0][i].getData(dummy);
+						dummycnt = 0;
+					}
 					buffer_l[buffer_frame_start[p] + f] += (input[i][input_frame_start[p] + f]
 						* attenuation_l[i]);
+					dummycnt++;
 				}
 			}
 
@@ -138,10 +283,16 @@ public:
 			}
 
 			// Make passes
+			dummycnt = 0;
 			for (int p = 0; p < passes; p++) {
 				for (int f = 0; f < input_frame_size[p]; f++) {
+					if (dummycnt == dummy) {
+						avg[1][i].getData(dummy);
+						dummycnt = 0;
+					}
 					buffer_r[buffer_frame_start[p] + f] += (input[i][input_frame_start[p] + f]
 						* attenuation_r[i]);
+					dummy++;
 				}
 			}
 		}
@@ -184,6 +335,7 @@ public:
 		const int COUNT = 4;
 
 		// Define angles
+		if (pdist > 2 * r) pdist = r;
 		float alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
 		// float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
 		float alpha_p[COUNT]; // Angle of individual sources [rad] (center = 0, right > 0)
@@ -196,10 +348,10 @@ public:
 				alpha_p[(COUNT / 2) - (1 + i)] = -alpha_p[(COUNT / 2) + i];
 			}
 		} else {
-			alpha_p[(COUNT + 1) / 2] = 0.f;
-			for (int i = 0; i < (COUNT - 1) / 2; i++) {
-				alpha_p[(COUNT - 1) / 2 + i] = alpha * i; 
-				alpha_p[(COUNT - 1) / 2 - i] = -alpha_p[(COUNT - 1) / 2 + i];
+			alpha_p[(COUNT - 1) / 2] = 0.f;
+			for (int i = 1; i < (COUNT + 1) / 2; i++) {
+				alpha_p[(COUNT + 1) / 2 + i] = alpha * i; 
+				alpha_p[(COUNT + 1) / 2 - i] = -alpha_p[(COUNT - 1) / 2 + i];
 			}
 		}
 		// ...then add angle displacement.
@@ -248,18 +400,20 @@ private:
 	float* ear_dist = NULL;
 	float* alpha0 = NULL;
 
-	float r_old = 0;
-	float pdist_old = 0;
-	float edist_old = 0;
-	float a0_old = 0;
+	float r_target = 0;
+	float pdist_target = 0;
+	float edist_target = 0;
+	float a0_target = 0;
 	float sample_rate;
 	float v_air = 343.2;
 
-	int samples_l[4], samples_r[4];
-	float attenuation_l[4], attenuation_r[4];
-	float buffer_l[BUFFER_SIZE];
-	float buffer_r[BUFFER_SIZE];
+	int samples_l[CHANNELS], samples_r[CHANNELS];
+	float attenuation_l[CHANNELS], attenuation_r[CHANNELS];
+	std::vector<float> buffer_l;
+	std::vector<float> buffer_r;
 	uint32_t buffer_ptr;
+	int BUFFER_SIZE;
+	std::vector<std::vector<SampleAverager> > avg;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);

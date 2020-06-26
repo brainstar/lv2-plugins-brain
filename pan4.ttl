@@ -30,8 +30,8 @@
 		lv2:index 2 ;
 		lv2:symbol "edist" ;
 		lv2:name "Ear distance" ;
-		lv2:default 0.2 ;
-		lv2:minimum 0.0 ;
+		lv2:default 0.149 ;
+		lv2:minimum 0.01 ;
 		lv2:maximum 1.0
 	] , [
 		a lv2:InputPort ,
