@@ -122,9 +122,11 @@ class Pan : public lvtk::Plugin<Pan> {
 public:
 	Pan(const lvtk::Args &args) : Plugin(args) {
 		sample_rate = static_cast<float> (args.sample_rate);
-		for (int i = 0; i < 4; i++) {
-			samples_l[i] = samples_r[i] = 0;
-			attenuation_l[i] = attenuation_r[i] = 1.f;
+		samples.resize(2);
+		attenuation.resize(2);
+		for (int i = 0; i < 2; i++) {
+			samples[i].resize(CHANNELS, 0);
+			attenuation[i].resize(CHANNELS, 1.f);
 		}
 		// Take values from ttl file
 		// Max. signal path: max. radius + max. ear distance
@@ -202,99 +204,12 @@ public:
 		}
 
 		for (int i = 0; i < CHANNELS; i++) {
-			avg[0][i].pushData(samples_l[i], nframes);
-			avg[1][i].pushData(samples_r[i], nframes);
+			avg[0][i].pushData(samples[0][i], nframes);
+			avg[1][i].pushData(samples[1][i], nframes);
 		}
 
 		// buffer_ptr <=> frame 0
-		// Write data to buffer
-		// Iterate through sources
-		uint32_t offset = 0;
-		int passes = 1;
-		uint32_t buffer_frame_start[2];
-		uint32_t input_frame_start[2];
-		uint32_t input_frame_size[2];
 		for (int i = 0; i < 4; i++) {
-			int dummy;
-			// Left side:
-			// Determine number of passes:
-			offset = buffer_ptr + samples_l[i];
-			if (offset > BUFFER_SIZE) {
-				// Single pass, total overflow
-				passes = 1;
-				buffer_frame_start[0] = (buffer_ptr + samples_l[i]) - BUFFER_SIZE;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = nframes;
-			} else if (offset + nframes > BUFFER_SIZE) {
-				// Dual pass, partial overflow
-				passes = 2;
-				buffer_frame_start[0] = offset;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = BUFFER_SIZE - offset;
-				buffer_frame_start[1] = 0;
-				input_frame_start[1] = input_frame_size[0];
-				input_frame_size[1] = nframes - input_frame_size[0];
-			} else {
-				// Single pass, no overflow
-				passes = 1;
-				buffer_frame_start[0] = offset;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = nframes;
-			}
-
-			// Make passes
-			int dummycnt = 0;
-			for (int p = 0; p < passes; p++) {
-				for (int f = 0; f < input_frame_size[p]; f++) {
-					if (dummycnt == dummy) {
-						avg[0][i].getData(dummy);
-						dummycnt = 0;
-					}
-					buffer_l[buffer_frame_start[p] + f] += (input[i][input_frame_start[p] + f]
-						* attenuation_l[i]);
-					dummycnt++;
-				}
-			}
-
-			// Right side:
-			// Determine number of passes:
-			offset = buffer_ptr + samples_r[i];
-			if (offset > BUFFER_SIZE) {
-				// Single pass, total overflow
-				passes = 1;
-				buffer_frame_start[0] = (buffer_ptr + samples_r[i]) - BUFFER_SIZE;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = nframes;
-			} else if (offset + nframes > BUFFER_SIZE) {
-				// Dual pass, partial overflow
-				passes = 2;
-				buffer_frame_start[0] = offset;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = BUFFER_SIZE - offset;
-				buffer_frame_start[1] = 0;
-				input_frame_start[1] = input_frame_size[0];
-				input_frame_size[1] = nframes - input_frame_size[0];
-			} else {
-				// Single pass, no overflow
-				passes = 1;
-				buffer_frame_start[0] = offset;
-				input_frame_start[0] = 0;
-				input_frame_size[0] = nframes;
-			}
-
-			// Make passes
-			dummycnt = 0;
-			for (int p = 0; p < passes; p++) {
-				for (int f = 0; f < input_frame_size[p]; f++) {
-					if (dummycnt == dummy) {
-						avg[1][i].getData(dummy);
-						dummycnt = 0;
-					}
-					buffer_r[buffer_frame_start[p] + f] += (input[i][input_frame_start[p] + f]
-						* attenuation_r[i]);
-					dummy++;
-				}
-			}
 		}
 
 		// Output buffer to stream
@@ -360,7 +275,7 @@ public:
 		double posx, posy, time_l, time_r;
 		double dist_l[COUNT];
 		double dist_r[COUNT];
-		double attenuation = 1.0;
+		double att = 1.0;
 
 		for (int i = 0; i < COUNT; i++) {
 			// Calculate position of source
@@ -372,23 +287,23 @@ public:
 			dist_r[i] = sqrt(pow((posx - eardist / 2.0), 2) + pow(posy, 2));
 
 			// Calculate attenuation and build product over attenuation
-			attenuation_l[i] = r / dist_l[i];
-			attenuation_r[i] = r / dist_r[i];
-			attenuation *= attenuation_l[i];
-			attenuation *= attenuation_r[i];
+			attenuation[0][i] = r / dist_l[i];
+			attenuation[0][i] = r / dist_r[i];
+			att *= attenuation[0][i];
+			att *= attenuation[1][i];
 
 			// Calculate sample delay
 			time_l = dist_l[i] / v_air;
 			time_r = dist_r[i] / v_air;
-			samples_l[i] = (int) round(time_l / (1.0 / sample_rate));
-			samples_r[i] = (int) round(time_r / (1.0 / sample_rate));
+			samples[0][i] = (int) round(time_l / (1.0 / sample_rate));
+			samples[1][i] = (int) round(time_r / (1.0 / sample_rate));
 		}
 
 		// Normalize attenuation
-		attenuation = 1.f / attenuation;
+		att = 1.f / att;
 		for (int i = 0; i < COUNT; i++) {
-			attenuation_l[i] *= attenuation;
-			attenuation_r[i] *= attenuation;
+			attenuation[0][i] *= att;
+			attenuation[1][i] *= att;
 		}
 	}
 
@@ -407,8 +322,8 @@ private:
 	float sample_rate;
 	float v_air = 343.2;
 
-	int samples_l[CHANNELS], samples_r[CHANNELS];
-	float attenuation_l[CHANNELS], attenuation_r[CHANNELS];
+	std::vector<std::vector<int> > samples;
+	std::vector<std::vector<float> > attenuation;
 	std::vector<float> buffer_l;
 	std::vector<float> buffer_r;
 	uint32_t buffer_ptr;
