@@ -266,14 +266,14 @@ public:
 		// Step 1: Buffer input
 		for (int ch = 0; ch < CHANNELS; ch++) {
 			// Is there an overflow?
-			if (generalBufferPointer + nframes < BUFFER_SIZE) {
+			if (generalBufferPointer + nframes <= BUFFER_SIZE) {
 				// If not: simply copy all the elements
 				for (int i = 0; i < nframes; i++) inputBuffer[ch][generalBufferPointer + i] = input[ch][i];
 			} else {
-				int offset = BUFFER_SIZE - generalBufferPointer;
-				for (int i = 0; i < offset; i++) inputBuffer[ch][generalBufferPointer + i] = input[ch][i];
-				int offset2 = nframes - offset;
-				for (int i = 0; i < offset2; i++) inputBuffer[ch][i] = inputBuffer[ch][offset + i];
+				int sizeLeft = BUFFER_SIZE - generalBufferPointer;
+				for (int i = 0; i < sizeLeft; i++) inputBuffer[ch][generalBufferPointer + i] = input[ch][i];
+				int framesLeft = nframes - sizeLeft;
+				for (int i = 0; i < framesLeft; i++) inputBuffer[ch][i] = input[ch][sizeLeft + i];
 			}
 		}
 
