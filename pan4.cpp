@@ -101,6 +101,11 @@ public:
 
 	// Read out data without incrementing ptrRead
 	float readData(int offset = 0) {
+		int position = ptrRead + offset;
+		while (position >= iSize) position -= iSize;
+		while (position < 0) position += iSize;
+
+		return vecSumScaled[position];
 	}
 
 private:
