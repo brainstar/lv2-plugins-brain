@@ -129,6 +129,11 @@ public:
 		return vecSumScaled[position];
 	}
 
+	void resetPointers() {
+		ptrFill = 0;
+		ptrRead = 0;
+	}
+
 private:
 	int iSize;
 	int *vecData;
@@ -193,6 +198,8 @@ public:
 		}
 		
 		generalBufferPointer = 0;
+		timer = 0;
+		useAverage = true;
 	}
 
 	~Pan() {
@@ -257,9 +264,22 @@ public:
 			}
 		}
 		generalBufferPointer = 0;
+		timer = 0;
+		useAverage = true;
 	} 
 
 	void deactivate() {
+	}
+
+	float getInputValue(int ch, int offset) {
+		// Transform relative offset -> position in array
+		offset += generalBufferPointer;
+
+		// Scale into correct values
+		while (offset < 0) offset += BUFFER_SIZE;
+		while (offset >= BUFFER_SIZE) offset -= BUFFER_SIZE;
+
+		return inputBuffer[ch][offset];
 	}
 
 	float getInterpolatedValue(int ch, float offset) {
@@ -294,10 +314,17 @@ public:
 			a0_target = *alpha0;
 		}
 
-		// TODO: What if nframes % batchsize != 0??? (Should not be the case, but Murphy)
-		for (int i = 0; i < CHANNELS; i++) {
-			avg[0][i].pushData(delay[0][i], nframes / avgBatchSize);
-			avg[1][i].pushData(delay[1][i], nframes / avgBatchSize);
+		if (useAverage) {
+			// TODO: What if nframes % batchsize != 0??? (Should not be the case, but Murphy)
+			for (int i = 0; i < CHANNELS; i++) {
+				avg[0][i].pushData(delay[0][i], nframes / avgBatchSize);
+				avg[1][i].pushData(delay[1][i], nframes / avgBatchSize);
+			}
+			timer += nframes;
+			if (timer > sample_rate) {
+				useAverage = false;
+				timer = 0;
+			}
 		}
 
 		// Step 1: Buffer input
@@ -317,18 +344,31 @@ public:
 		// Step 2: Output
 		int batches;
 		float value;
-		for (int i = 0; i < 2; i++) {
-			batches = nframes / avgBatchSize;
-			for (int b = 0; b < batches; b++) {
-				// Fill delay buffer
-				for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].popData();
-				for (int f = 0; f < avgBatchSize; f++) {
+		if (!useAverage) {
+			for (int i = 0; i < 2; i++) {
+				for (int f = 0; f < nframes; f++) {
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
+						value += (getInputValue(ch, f - delay[i][ch]) * attenuation[i][ch]);
 					}
-					output[i][f + b * avgBatchSize] = value;
+					output[i][f] = value;
+				}
+			}
+		} else {
+			for (int i = 0; i < 2; i++) {
+				batches = nframes / avgBatchSize;
+				for (int b = 0; b < batches; b++) {
+					// Fill delay buffer
+					for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].popData();
+					for (int f = 0; f < avgBatchSize; f++) {
+						value = 0.f;
+						// Get every frame from the right buffer
+						for (int ch = 0; ch < CHANNELS; ch++) {
+							value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
+						}
+						output[i][f + b * avgBatchSize] = value;
+					}
 				}
 			}
 		}
@@ -394,6 +434,9 @@ public:
 			attenuation[0][i] *= att;
 			attenuation[1][i] *= att;
 		}
+
+		timer = 0;
+		useAverage = true;
 	}
 
 private:
@@ -424,6 +467,8 @@ private:
 	int generalBufferPointer;
 
 	int avgBatchSize;
+	int timer;
+	bool useAverage;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);
