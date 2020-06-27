@@ -168,7 +168,7 @@ public:
 			for (int j = 0; j < CHANNELS; j++) {
 				delay[i][j] = 0;
 				attenuation[i][j] = 1.f;
-				avg[i][j].initialize(sample_rate, 1);
+				avg[i][j].initialize(args.sample_rate, 4);
 			}
 		}
 
@@ -232,6 +232,7 @@ public:
 
 		// Determine correct address in ring buffer
 		position = offset + generalBufferPointer;
+		while (position < 0) position += BUFFER_SIZE;
 
 		// Determine corresponding indices and weights.
 		index1 = (int) position;
@@ -288,8 +289,7 @@ public:
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += getInterpolatedValue(ch, (f + b * batchsize));
-						// value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
+						value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
 					output[i][f + b * batchsize] = value;
 				}
