@@ -4,7 +4,6 @@
 #include <xmmintrin.h>
 
 #include <math.h>
-#include <vector>
 #include <lvtk/plugin.hpp>
 
 #define PAN_URI "http://github.com/brainstar/lv2/pan4"
@@ -30,9 +29,6 @@ public:
 		vecData = new int[iSize];
 		vecSum = new long[iSize];
 		vecSumScaled = new float[iSize];
-		// vecData = std::vector<int>(iSize, 0);
-		// vecSum = std::vector<long>(iSize, 0);
-		// vecSumScaled = std::vector<float>(iSize, 0);
 
 		clean();
 	}
@@ -139,9 +135,6 @@ private:
 	int *vecData;
 	long *vecSum;
 	float *vecSumScaled;
-	// std::vector<int> vecData;
-	// std::vector<long> vecSum;
-	// std::vector<float> vecSumScaled;
 
 	int ptrFill, ptrRead;
 };
@@ -166,7 +159,7 @@ public:
 		a0_target = 0.f;
 		v_air = 343.2;
 
-		avgBatchSize = 1;
+		avgBatchSize = 8;
 		int batches;
 		while ((int) args.sample_rate % avgBatchSize != 0) avgBatchSize /= 2;
 		batches = (int) args.sample_rate / avgBatchSize;
