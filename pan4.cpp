@@ -328,11 +328,11 @@ private:
 
 	float* input[4] { 0, 0, 0, 0 };
 	float* output[2] { 0, 0 };
-	float* radius = NULL;
-	float* player_dist = NULL;
-	float* ear_dist = NULL;
-	float* alpha0 = NULL;
-	float* relative_delays = NULL;
+	float* radius = nullptr;
+	float* player_dist = nullptr;
+	float* ear_dist = nullptr;
+	float* alpha0 = nullptr;
+	float* relative_delays = nullptr;
 
 	float r_target = 0;
 	float pdist_target = 0;
