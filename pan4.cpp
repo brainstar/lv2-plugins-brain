@@ -140,133 +140,6 @@ private:
 
 	int ptrFill, ptrRead;
 };
-/*
-class SampleAverager
-{
-public:
-	SampleAverager() {}
-	~SampleAverager() {}
-
-	void initialize(int framerate, int divider) {
-		// Set Framerate, used for extracting the values
-		frate = framerate;
-		// Only save every x-th value, interpolation on extraction
-		this->divider = divider;
-		// size of divider, should divide framerate;
-		size = frate / divider;
-
-		samples_data.resize(size, 0);
-		samples_sum.resize(size, 0);
-		samples_sum_reduced.resize(size, 0.f);
-		rest = 0;
-	}
-
-	void clean() {
-		for (int i = 0; i < size; i++) {
-			samples_data[i] = 0;
-			samples_sum[i] = 0;
-			samples_sum_reduced[i] = 0;
-		}
-		fillPtr = 0;
-		readPtr = 0;
-		rest = 0;
-	}
-
-	void pushData(int value, int nframes) {
-		// Step 1: First check, if there are enough elements to work with
-		if (nframes + rest < divider) {
-			rest += nframes;
-			return;
-		}
-
-		// Step 2: If there's a rest, handle it before
-		if (rest) {
-			// (nframes + rest) - divider
-			nframes -= (divider - rest);
-			samples_sum[fillPtr] = samples_sum[fillPtr == 0 ? (size - 1) : fillPtr]
-				- samples_data[fillPtr] + value;
-			samples_data[fillPtr] = value;
-			samples_sum_reduced[fillPtr] = (float) samples_sum[fillPtr] / size;
-			fillPtr++;
-			if (fillPtr == size) fillPtr = 0;
-		}
-
-		// Step 3
-		// Caculate amount of delay and resulting rest
-		int fullSamplesCount = nframes / divider;
-		rest = nframes % divider;
-
-		// No full sapmles? Abort.
-		if (!fullSamplesCount) return;
-
-		// 3.a) First check if fillPtr == 0
-		if (fillPtr == 0) {
-			samples_sum[0] = samples_sum[size - 1]
-				- samples_data[0] + value;
-			samples_data[0] = value;
-			samples_sum_reduced[0] = (float) samples_sum[0] / size;
-			fillPtr = 1;
-			fullSamplesCount--;
-		}
-
-		// 3.b) Single or double pass?
-		if (fillPtr + fullSamplesCount < size) {
-			// 3.c1) Single pass
-			for (int i = fillPtr; i < fillPtr + fullSamplesCount; i++) {
-				samples_sum[i] = samples_sum[i - 1]
-					- samples_data[i] + value;
-				samples_data[i] = value;
-				samples_sum_reduced[i] = (float) samples_sum[i] / size;
-			}
-			fillPtr += fullSamplesCount;
-		} else {
-			// 3.c2) Double pass: TODO
-			// Calculate frame count for second pass
-			fullSamplesCount -= (size - fillPtr);
-			// Fill in frames from [fillPtr, size[
-			for (int i = fillPtr; i < size; i++) {
-				samples_sum[i] = samples_sum[i - 1]
-					- samples_data[i] + value;
-				samples_data[i] = value;
-				samples_sum_reduced[i] = (float) samples_sum[i] / size;
-			}
-			// Fill in the 0
-			samples_sum[0] = samples_sum[size - 1]
-				- samples_data[0] + value;
-			samples_data[0] = value;
-			samples_sum_reduced[0] = (float) samples_sum[0] / size;
-			fillPtr = 1;
-
-			// Fill in frames from [1, fullSamplesCount[
-			for (int i = fillPtr; i < fullSamplesCount; i++) {
-				samples_sum[i] = samples_sum[i - 1]
-					- samples_data[i] + value;
-				samples_data[i] = value;
-				samples_sum_reduced[i] = (float) samples_sum[i] / size;
-			}
-
-			// Reset fillPtr
-			fillPtr = fullSamplesCount;
-		}
-	}
-
-	float getData() {
-		if (readPtr >= size) readPtr -= size;
-		return samples_sum_reduced[readPtr++];
-	}
-
-	int getBatchSize() {
-		return divider;
-	}
-
-private:
-	std::vector<int> samples_data;
-	std::vector<long> samples_sum;
-	std::vector<float> samples_sum_reduced;
-	int frate, divider, size;
-	int rest = 0;
-	int fillPtr = 0, readPtr = 0;
-};*/
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
@@ -448,13 +321,13 @@ public:
 			batches = nframes / avgBatchSize;
 			for (int b = 0; b < batches; b++) {
 				// Fill delay buffer
-				// for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].popData();
+				for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].popData();
 				for (int f = 0; f < avgBatchSize; f++) {
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += (getInterpolatedValue(ch, (f + b * avgBatchSize)) * attenuation[i][ch]);
-						// value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
+						// value += (getInterpolatedValue(ch, (f + b * avgBatchSize)) * attenuation[i][ch]);
+						value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
 					output[i][f + b * avgBatchSize] = value;
 				}
