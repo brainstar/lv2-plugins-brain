@@ -161,7 +161,7 @@ public:
 		a0_target = 0.f;
 		v_air = 343.2;
 
-		avgBatchSize = 8;
+		avgBatchSize = 1;
 		int batches;
 		while ((int) args.sample_rate % avgBatchSize != 0) avgBatchSize /= 2;
 		batches = (int) args.sample_rate / avgBatchSize;
@@ -326,7 +326,6 @@ public:
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						// value += (getInterpolatedValue(ch, (f + b * avgBatchSize)) * attenuation[i][ch]);
 						value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
 					output[i][f + b * avgBatchSize] = value;
@@ -338,38 +337,36 @@ public:
 	}
 
 	void update_data(float r, float pdist, float eardist, float a0) {
-		// Define source count, fixed by plugin input size at compile time
-		const int COUNT = 4;
-
+		if (r == 0) r = 0.01f;
 		// Define angles
 		if (pdist > 2 * r) pdist = r;
 		float alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
 		// float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
-		float alpha_p[COUNT]; // Angle of individual sources [rad] (center = 0, right > 0)
+		float alpha_p[CHANNELS]; // Angle of individual sources [rad] (center = 0, right > 0)
 
 		// Calculate angles of individual sources
 		// First for symmetrical setup...
-		if (COUNT % 2 == 0) {
-			for (int i = 0; i < COUNT / 2; i++) {
-				alpha_p[(COUNT / 2) + i] = (0.5f + i) * alpha;
-				alpha_p[(COUNT / 2) - (1 + i)] = -alpha_p[(COUNT / 2) + i];
+		if (CHANNELS % 2 == 0) {
+			for (int i = 0; i < CHANNELS / 2; i++) {
+				alpha_p[(CHANNELS / 2) + i] = (0.5f + i) * alpha;
+				alpha_p[(CHANNELS / 2) - (1 + i)] = -alpha_p[(CHANNELS / 2) + i];
 			}
 		} else {
-			alpha_p[(COUNT - 1) / 2] = 0.f;
-			for (int i = 1; i < (COUNT + 1) / 2; i++) {
-				alpha_p[(COUNT + 1) / 2 + i] = alpha * i; 
-				alpha_p[(COUNT + 1) / 2 - i] = -alpha_p[(COUNT - 1) / 2 + i];
+			alpha_p[CHANNELS / 2] = 0.f;
+			for (int i = 1; i < CHANNELS / 2; i++) {
+				alpha_p[CHANNELS / 2 + i] = alpha * i; 
+				alpha_p[CHANNELS / 2 - i] = -alpha_p[CHANNELS / 2 + i];
 			}
 		}
 		// ...then add angle displacement.
-		for (int i = 0; i < COUNT; i++) alpha_p[i] += a0;
+		for (int i = 0; i < CHANNELS; i++) alpha_p[i] += a0;
 
 		double posx, posy, time_l, time_r;
-		double dist_l[COUNT];
-		double dist_r[COUNT];
+		double dist_l[CHANNELS];
+		double dist_r[CHANNELS];
 		double att = 1.0;
 
-		for (int i = 0; i < COUNT; i++) {
+		for (int i = 0; i < CHANNELS; i++) {
 			// Calculate position of source
 			posx = r * sin(alpha_p[i]);
 			posy = r * cos(alpha_p[i]);
@@ -380,7 +377,7 @@ public:
 
 			// Calculate attenuation and build product over attenuation
 			attenuation[0][i] = r / dist_l[i];
-			attenuation[0][i] = r / dist_r[i];
+			attenuation[1][i] = r / dist_r[i];
 			att *= attenuation[0][i];
 			att *= attenuation[1][i];
 
@@ -393,7 +390,7 @@ public:
 
 		// Normalize attenuation
 		att = 1.f / att;
-		for (int i = 0; i < COUNT; i++) {
+		for (int i = 0; i < CHANNELS; i++) {
 			attenuation[0][i] *= att;
 			attenuation[1][i] *= att;
 		}
