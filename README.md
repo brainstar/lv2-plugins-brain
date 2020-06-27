@@ -20,3 +20,7 @@ Control values are:
    If switched of, this can help placing different instruments on different distances away from the listener by using two plugins with different radius values
 
 A word to the CPU usage. This plugin interpolates between samples, when the parameters are changed. This causes a doppler effect, but prevents artifacts from skipping samples. After a second without changes, it stops interpolating and the CPU usage is reduced drastically (on my system typically to ~30% of the previous usage).
+
+## License
+
+This software is distributed under the GPL 3.0 License.
