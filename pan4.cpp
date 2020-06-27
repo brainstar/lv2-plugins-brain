@@ -95,6 +95,8 @@ public:
 
 	// Get data point out of the filter and increment ptrRead
 	float popData() {
+		if (ptrRead == iSize) ptrRead = 0;
+		return vecSumScaled[ptrRead++];
 	}
 
 	// Read out data without incrementing ptrRead
