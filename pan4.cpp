@@ -13,15 +13,26 @@ const int CHANNELS = 4;
 class MovingAverage
 {
 public:
-	MovingAverage() {}
-	~MovingAverage() {}
+	MovingAverage() {
+		vecData = nullptr;
+		vecSum = nullptr;
+		vecSumScaled = nullptr;
+	}
+	~MovingAverage() {
+		delete[] vecData;
+		delete[] vecSum;
+		delete[] vecSumScaled;
+	}
 
 	void init(int size) {
 		iSize = size;
 
-		vecData.resize(iSize);
-		vecSum.resize(iSize);
-		vecSumScaled.resize(iSize);
+		vecData = new int[iSize];
+		vecSum = new long[iSize];
+		vecSumScaled = new float[iSize];
+		// vecData = std::vector<int>(iSize, 0);
+		// vecSum = std::vector<long>(iSize, 0);
+		// vecSumScaled = std::vector<float>(iSize, 0);
 
 		clean();
 	}
@@ -47,6 +58,16 @@ public:
 		// As this is an RT application, there is no reason to
 		// anticipate this kind of behaviour and this comparison would
 		// slow the programm down a little bit
+		/*if (length >= iSize) {
+			long sum = value * iSize;
+			for (int i = 0; i < iSize; i++) {
+				vecData[i] = value;
+				vecSum[i] = sum;
+				vecSumScaled[i] = value;
+			}
+			ptrFill += length;
+			ptrFill %= iSize;
+		}*/
 
 		// Prevent buffer underrun
 		if (ptrFill == 0) {
@@ -110,13 +131,16 @@ public:
 
 private:
 	int iSize;
-	std::vector<int> vecData;
-	std::vector<long> vecSum;
-	std::vector<float> vecSumScaled;
+	int *vecData;
+	long *vecSum;
+	float *vecSumScaled;
+	// std::vector<int> vecData;
+	// std::vector<long> vecSum;
+	// std::vector<float> vecSumScaled;
 
 	int ptrFill, ptrRead;
 };
-
+/*
 class SampleAverager
 {
 public:
@@ -242,7 +266,7 @@ private:
 	int frate, divider, size;
 	int rest = 0;
 	int fillPtr = 0, readPtr = 0;
-};
+};*/
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
@@ -264,23 +288,56 @@ public:
 		a0_target = 0.f;
 		v_air = 343.2;
 
-		delay.resize(2);
-		attenuation.resize(2);
-		avg.resize(2);
+		avgBatchSize = 8;
+		int batches;
+		while ((int) args.sample_rate % avgBatchSize != 0) avgBatchSize /= 2;
+		batches = (int) args.sample_rate / avgBatchSize;
+
+		delay = new int*[2];
+		attenuation = new float*[2];
+		avg = new MovingAverage*[2];
 
 		for (int i = 0; i < 2; i++) {
-			delay[i].resize(CHANNELS);
-			attenuation[i].resize(CHANNELS);
-			avg[i].resize(CHANNELS);
+			avg[i] = new MovingAverage[CHANNELS];
+			attenuation[i] = new float[CHANNELS];
+			delay[i] = new int[CHANNELS];
+
 			for (int j = 0; j < CHANNELS; j++) {
-				delay[i][j] = 0;
+				avg[i][j].init(batches);
 				attenuation[i][j] = 1.f;
-				avg[i][j].initialize(args.sample_rate, 4);
+				delay[i][j] = 0;
 			}
 		}
 
-		inputBuffer = std::vector<std::vector<float> >(CHANNELS, std::vector<float>(BUFFER_SIZE, 0.f));
-		delayBuffer = std::vector<float> (CHANNELS, 0);
+		inputBuffer = new float*[CHANNELS];
+		delayBuffer = new float[CHANNELS];
+		for (int ch = 0; ch < CHANNELS; ch++) {
+			delayBuffer[ch] = 0.f;
+			inputBuffer[ch] = new float[BUFFER_SIZE];
+			for (int i = 0; i < BUFFER_SIZE; i++) {
+				inputBuffer[ch][i] = 0.f;
+			}
+		}
+		
+		generalBufferPointer = 0;
+	}
+
+	~Pan() {
+		for (int i = 0; i < 2; i++) {
+			delete[] avg[i];
+			delete[] attenuation[i];
+			delete[] delay[i];
+		}
+
+		for (int ch = 0; ch < CHANNELS; ch++) {
+			delete[] inputBuffer[ch];
+		}
+		
+		delete[] delayBuffer;
+		delete[] avg;
+		delete[] attenuation;
+		delete[] delay;
+		delete[] inputBuffer;
 	}
 
 	void connect_port(uint32_t port, void* data) {
@@ -364,9 +421,10 @@ public:
 			a0_target = *alpha0;
 		}
 
+		// TODO: What if nframes % batchsize != 0??? (Should not be the case, but Murphy)
 		for (int i = 0; i < CHANNELS; i++) {
-			avg[0][i].pushData(delay[0][i], nframes);
-			avg[1][i].pushData(delay[1][i], nframes);
+			avg[0][i].pushData(delay[0][i], nframes / avgBatchSize);
+			avg[1][i].pushData(delay[1][i], nframes / avgBatchSize);
 		}
 
 		// Step 1: Buffer input
@@ -384,26 +442,26 @@ public:
 		}
 
 		// Step 2: Output
-		int batchsize, batches;
+		int batches;
 		float value;
 		for (int i = 0; i < 2; i++) {
-			batchsize = avg[i][0].getBatchSize();
-			batches = nframes / batchsize;
+			batches = nframes / avgBatchSize;
 			for (int b = 0; b < batches; b++) {
 				// Fill delay buffer
-				for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].getData();
-				for (int f = 0; f < batchsize; f++) {
+				// for (int ch = 0; ch < CHANNELS; ch++) delayBuffer[ch] = avg[i][ch].popData();
+				for (int f = 0; f < avgBatchSize; f++) {
 					value = 0.f;
 					// Get every frame from the right buffer
 					for (int ch = 0; ch < CHANNELS; ch++) {
-						value += (getInterpolatedValue(ch, (f + b * batchsize) - delayBuffer[ch]) * attenuation[i][ch]);
+						value += (getInterpolatedValue(ch, (f + b * avgBatchSize)) * attenuation[i][ch]);
+						// value += (getInterpolatedValue(ch, (f + b * avgBatchSize) - delayBuffer[ch]) * attenuation[i][ch]);
 					}
-					output[i][f + b * batchsize] = value;
+					output[i][f + b * avgBatchSize] = value;
 				}
 			}
 		}
 		generalBufferPointer += nframes;
-		generalBufferPointer %= BUFFER_SIZE;
+		if (generalBufferPointer >= BUFFER_SIZE) generalBufferPointer -= BUFFER_SIZE;
 	}
 
 	void update_data(float r, float pdist, float eardist, float a0) {
@@ -485,15 +543,17 @@ private:
 	float sample_rate;
 	float v_air = 343.2;
 
-	std::vector<std::vector<int> > delay;
-	std::vector<std::vector<float> > attenuation;
-	std::vector<std::vector<SampleAverager> > avg;
+	int** delay;
+	float** attenuation;
+	MovingAverage** avg;
 
-	std::vector<std::vector<float> > inputBuffer;
+	float** inputBuffer;
 
-	std::vector<float> delayBuffer;
+	float *delayBuffer;
 
 	int generalBufferPointer;
+
+	int avgBatchSize;
 };
 
 static const lvtk::Descriptor<Pan> pan (PAN_URI);
