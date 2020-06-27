@@ -10,6 +10,54 @@
 #define PAN_URI "http://github.com/brainstar/lv2/pan4"
 const int CHANNELS = 4;
 
+class MovingAverage
+{
+public:
+	MovingAverage() {}
+	~MovingAverage() {}
+
+	void init(int size) {
+		iSize = size;
+
+		vecData.resize(iSize);
+		vecSum.resize(iSize);
+		vecSumScaled.resize(iSize);
+
+		clean();
+	}
+
+	void clean() {
+		for (int i = 0; i < iSize; i++) {
+			vecData[i] = 0;
+			vecSum[i] = 0;
+			vecSumScaled[i] = 0.0;
+		}
+
+		ptrFill = 0;
+		ptrRead = 0;
+	}
+
+	// Push data points into the average filter
+	void pushData(int value, int length = 1) {
+	}
+
+	// Get data point out of the filter and increment ptrRead
+	float popData() {
+	}
+
+	// Read out data without incrementing ptrRead
+	float readData(int offset = 0) {
+	}
+
+private:
+	int iSize;
+	std::vector<int> vecData;
+	std::vector<long> vecSum;
+	std::vector<float> vecSumScaled;
+
+	int ptrFill, ptrRead;
+};
+
 class SampleAverager
 {
 public:
