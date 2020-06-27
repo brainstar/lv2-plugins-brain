@@ -190,10 +190,6 @@ public:
 				avg[1][i].pushData(delay[1][i], nframes / avgBatchSize);
 			}
 			timer += nframes;
-			if (timer > sample_rate) {
-				useAverage = false;
-				timer = 0;
-			}
 		}
 
 		// Step 1: Buffer input
@@ -239,6 +235,10 @@ public:
 						output[i][f + b * avgBatchSize] = value;
 					}
 				}
+			}
+			if (timer > sample_rate) {
+				useAverage = false;
+				timer = 0;
 			}
 		}
 		generalBufferPointer += nframes;
