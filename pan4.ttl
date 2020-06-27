@@ -78,4 +78,14 @@
 		lv2:index 9 ;
 		lv2:symbol "out_right" ;
 		lv2:name "Out Right"
+	] , [
+		a lv2:InputPort ,
+			lv2:ControlPort ;
+		lv2:index 10 ;
+		lv2:symbol "relative_mode" ;
+		lv2:name "Relative Delays" ;
+		lv2:minimum 0;
+		lv2:maximum 1;
+		lv2:default 0;
+		lv2:portProperty lv2:toggled
 	] .

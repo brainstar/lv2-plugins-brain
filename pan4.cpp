@@ -115,6 +115,9 @@ public:
 		else if (port == 9) {
 			output[1] = (float*) data;
 		}
+		else if (port == 10) {
+			relative_delays = (float*) data;
+		}
 	}
 
 	void activate() {
@@ -170,12 +173,14 @@ public:
 		if (*radius != r_target
 			|| *player_dist != pdist_target
 			|| *ear_dist != edist_target
-			|| *alpha0 != a0_target) {
-			update_data(*radius, *player_dist, *ear_dist, *alpha0);
+			|| *alpha0 != a0_target
+			|| *relative_delays != rel_delay_target) {
+			update_data(*radius, *player_dist, *ear_dist, *alpha0, *relative_delays);
 			r_target = *radius;
 			pdist_target = *player_dist;
 			edist_target = *ear_dist;
 			a0_target = *alpha0;
+			rel_delay_target = *relative_delays;
 		}
 
 		if (useAverage) {
@@ -240,7 +245,7 @@ public:
 		if (generalBufferPointer >= BUFFER_SIZE) generalBufferPointer -= BUFFER_SIZE;
 	}
 
-	void update_data(float r, float pdist, float eardist, float a0) {
+	void update_data(float r, float pdist, float eardist, float a0, float rel_delay) {
 		if (r == 0) r = 0.01f;
 		// Define angles
 		if (pdist > 2 * r) pdist = r;
@@ -292,6 +297,21 @@ public:
 			delay[1][i] = (int) round(time_r / (1.0 / sample_rate));
 		}
 
+		if (rel_delay > 0.5) {
+			// Reduce to relative delay between sources only
+			int min = delay[0][0];
+			for (int i = 0; i < 2; i++) {
+				for (int ch = 0; ch < CHANNELS; ch++) {
+					if (delay[i][ch] < min) min = delay[i][ch];
+				}
+			}
+			for (int i = 0; i < 2; i++) {
+				for (int ch = 0; ch < CHANNELS; ch++) {
+					delay[i][ch] -= min;
+				}
+			}
+		}
+
 		// Normalize attenuation
 		att = 1.f / att;
 		for (int i = 0; i < CHANNELS; i++) {
@@ -312,6 +332,7 @@ private:
 	float* player_dist = NULL;
 	float* ear_dist = NULL;
 	float* alpha0 = NULL;
+	float* relative_delays = NULL;
 
 	float r_target = 0;
 	float pdist_target = 0;
@@ -319,6 +340,7 @@ private:
 	float a0_target = 0;
 	float sample_rate;
 	float v_air = 343.2;
+	float rel_delay_target = 0;
 
 	int** delay;
 	float** attenuation;
