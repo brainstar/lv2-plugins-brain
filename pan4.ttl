@@ -40,8 +40,8 @@
 		lv2:symbol "alpha" ;
 		lv2:name "Alpha 0" ;
 		lv2:default 0.0 ;
-		lv2:minimum -2.0 ;
-		lv2:maximum 2.0
+		lv2:minimum -90.0 ;
+		lv2:maximum 90.0
 	] , [
 		a lv2:AudioPort ,
 			lv2:InputPort ;

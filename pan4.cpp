@@ -262,8 +262,8 @@ public:
 				alpha_p[CHANNELS / 2 - i] = -alpha_p[CHANNELS / 2 + i];
 			}
 		}
-		// ...then add angle displacement.
-		for (int i = 0; i < CHANNELS; i++) alpha_p[i] += a0;
+		// ...then add angle displacement. (You have to convert alpha from degrees to radiant!)
+		for (int i = 0; i < CHANNELS; i++) alpha_p[i] += (a0 / 180.f * M_PI);
 
 		double posx, posy, time_l, time_r;
 		double dist_l[CHANNELS];
