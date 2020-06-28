@@ -25,7 +25,6 @@
 #include "movingaverage.hpp"
 
 #define PAN_URI "http://github.com/brainstar/lv2/pan4"
-const int CHANNELS = 4;
 
 class Pan : public lvtk::Plugin<Pan> {
 public:
@@ -33,6 +32,8 @@ public:
 		_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 		_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 		sample_rate = static_cast<float> (args.sample_rate);
+
+		setChannels();
 
 		// Take values from ttl file
 		// Max. signal path: max. radius + max. ear distance
@@ -55,11 +56,13 @@ public:
 		delay = new int*[2];
 		attenuation = new float*[2];
 		avg = new MovingAverage*[2];
+		dist = new double*[2];
 
 		for (int i = 0; i < 2; i++) {
 			avg[i] = new MovingAverage[CHANNELS];
 			attenuation[i] = new float[CHANNELS];
 			delay[i] = new int[CHANNELS];
+			dist[i] = new double[CHANNELS];
 
 			for (int j = 0; j < CHANNELS; j++) {
 				avg[i][j].init(batches);
@@ -68,9 +71,11 @@ public:
 			}
 		}
 
+		input = new float*[CHANNELS];
 		inputBuffer = new float*[CHANNELS];
 		delayBuffer = new float[CHANNELS];
 		for (int ch = 0; ch < CHANNELS; ch++) {
+			input[ch] = nullptr;
 			delayBuffer[ch] = 0.f;
 			inputBuffer[ch] = new float[BUFFER_SIZE];
 			for (int i = 0; i < BUFFER_SIZE; i++) {
@@ -83,11 +88,16 @@ public:
 		useAverage = true;
 	}
 
+	void setChannels() {
+		CHANNELS = 4;
+	}
+
 	~Pan() {
 		for (int i = 0; i < 2; i++) {
 			delete[] avg[i];
 			delete[] attenuation[i];
 			delete[] delay[i];
+			delete[] dist[i];
 		}
 
 		for (int ch = 0; ch < CHANNELS; ch++) {
@@ -98,6 +108,7 @@ public:
 		delete[] avg;
 		delete[] attenuation;
 		delete[] delay;
+		delete[] dist;
 		delete[] inputBuffer;
 	}
 
@@ -288,8 +299,6 @@ public:
 		for (int i = 0; i < CHANNELS; i++) alpha_p[i] += (a0 / 180.f * M_PI);
 
 		double posx, posy, time_l, time_r;
-		double dist_l[CHANNELS];
-		double dist_r[CHANNELS];
 		double att = 1.0;
 
 		for (int i = 0; i < CHANNELS; i++) {
@@ -298,18 +307,18 @@ public:
 			posy = r * cos(alpha_p[i]);
 
 			// Calculate distance to listener
-			dist_l[i] = sqrt(pow((posx + eardist / 2.0), 2) + pow(posy, 2));
-			dist_r[i] = sqrt(pow((posx - eardist / 2.0), 2) + pow(posy, 2));
+			dist[0][i] = sqrt(pow((posx + eardist / 2.0), 2) + pow(posy, 2));
+			dist[1][i] = sqrt(pow((posx - eardist / 2.0), 2) + pow(posy, 2));
 
 			// Calculate attenuation and build product over attenuation
-			attenuation[0][i] = r / dist_l[i];
-			attenuation[1][i] = r / dist_r[i];
+			attenuation[0][i] = r / dist[0][i];
+			attenuation[1][i] = r / dist[1][i];
 			att *= attenuation[0][i];
 			att *= attenuation[1][i];
 
 			// Calculate sample delay
-			time_l = dist_l[i] / v_air;
-			time_r = dist_r[i] / v_air;
+			time_l = dist[0][i] / v_air;
+			time_r = dist[1][i] / v_air;
 			delay[0][i] = (int) round(time_l / (1.0 / sample_rate));
 			delay[1][i] = (int) round(time_r / (1.0 / sample_rate));
 		}
@@ -342,8 +351,9 @@ public:
 
 private:
 	int BUFFER_SIZE;
+	int CHANNELS;
 
-	float* input[4] { 0, 0, 0, 0 };
+	float** input;
 	float* output[2] { 0, 0 };
 	float* radius = nullptr;
 	float* player_dist = nullptr;
@@ -362,6 +372,8 @@ private:
 	int** delay;
 	float** attenuation;
 	MovingAverage** avg;
+
+	double** dist;
 
 	float** inputBuffer;
 
