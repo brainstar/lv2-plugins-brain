@@ -21,7 +21,7 @@
 #include <xmmintrin.h>
 #include <cstdint>
 #include <math.h>
-#include "movingaverage.hpp"
+#include "triangularaverage.hpp"
 
 class Pan {
 public:
@@ -71,11 +71,11 @@ public:
 
 		delay = new int*[2];
 		attenuation = new float*[2];
-		avg = new MovingAverage*[2];
+		avg = new TriangularAverage*[2];
 		dist = new double*[2];
 
 		for (int i = 0; i < 2; i++) {
-			avg[i] = new MovingAverage[CHANNELS];
+			avg[i] = new TriangularAverage[CHANNELS];
 			attenuation[i] = new float[CHANNELS];
 			delay[i] = new int[CHANNELS];
 			dist[i] = new double[CHANNELS];
@@ -354,7 +354,7 @@ protected:
 
 	int** delay;
 	float** attenuation;
-	MovingAverage** avg;
+	TriangularAverage** avg;
 
 	double** dist;
 
