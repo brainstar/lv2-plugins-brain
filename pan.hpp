@@ -67,7 +67,7 @@ public:
 		avgBatchSize = 8;
 		int batches;
 		while (srate % avgBatchSize != 0) avgBatchSize /= 2;
-		batches = srate / avgBatchSize;
+		batches = (2 * srate) / avgBatchSize;
 
 		delay = new int*[2];
 		attenuation = new float*[2];
@@ -82,6 +82,7 @@ public:
 
 			for (int j = 0; j < CHANNELS; j++) {
 				avg[i][j].init(batches);
+				avg[i][j].setWindowSize(batches / 2);
 				attenuation[i][j] = 1.f;
 				delay[i][j] = 0;
 			}
@@ -101,6 +102,7 @@ public:
 		
 		generalBufferPointer = 0;
 		timer = 0;
+		timerOverrun = (batches / 2 + 2) * avgBatchSize;
 		useAverage = true;
 	}
 	
@@ -118,16 +120,19 @@ public:
 			alpha0 = (float*) data;
 		}
 		else if (port == 4) {
-			relative_delays = (float*) data;
+			window_size = (float*) data;
 		}
 		else if (port == 5) {
-			output[0] = (float*) data;
+			relative_delays = (float*) data;
 		}
 		else if (port == 6) {
+			output[0] = (float*) data;
+		}
+		else if (port == 7) {
 			output[1] = (float*) data;
 		}
-		else if (port >= 7 && port < (7 + CHANNELS)) {
-			input[port - 7] = (float*) data;
+		else if (port >= 8 && port < (8 + CHANNELS)) {
+			input[port - 8] = (float*) data;
 		}
 	}
 
@@ -181,6 +186,17 @@ public:
 
 	void runBase(uint32_t nframes) {
 		// Update data if necessary
+		if (*window_size != window_target) {
+			window_target = *window_size;
+			for (int i = 0; i < 2; i++) {
+				for (int ch = 0; ch < CHANNELS; ch++) {
+					avg[i][ch].setWindowSize(window_target * sample_rate / avgBatchSize);
+				}
+			}
+			timer = 0;
+			timerOverrun = (avg[0][0].getWindowSize() + 2) * avgBatchSize;
+			useAverage = true;
+		}
 		if (*radius != r_target
 			|| *player_dist != pdist_target
 			|| *ear_dist != edist_target
@@ -247,7 +263,7 @@ public:
 					}
 				}
 			}
-			if (timer > sample_rate) {
+			if (timer > timerOverrun) {
 				useAverage = false;
 				timer = 0;
 			}
@@ -343,6 +359,7 @@ protected:
 	float* ear_dist = nullptr;
 	float* alpha0 = nullptr;
 	float* relative_delays = nullptr;
+	float* window_size = nullptr;
 
 	float r_target = 0;
 	float pdist_target = 0;
@@ -351,6 +368,7 @@ protected:
 	float sample_rate;
 	float v_air = 343.2;
 	float rel_delay_target = 0;
+	float window_target = 1.0;
 
 	int** delay;
 	float** attenuation;
@@ -365,6 +383,6 @@ protected:
 	int generalBufferPointer;
 
 	int avgBatchSize;
-	int timer;
+	int timer, timerOverrun;
 	bool useAverage;
 };

@@ -48,9 +48,14 @@ public:
         setWindowSize(iSize * 0.95);
     }
 
+	int getWindowSize() {
+		return iWindowSize;
+	}
+
     void setWindowSize(int size) {
         if (size >= iSize) size = iSize - 1;
         if (size % 2 != 0) size--;
+		iWindowSize = size;
         
 		vecOffset[0] = -(size + 1);
 		vecOffset[1] = -(size / 2 + 1);
@@ -58,6 +63,8 @@ public:
 
         size /= 2;
         fScalingFactor = (1.f + size) * size;
+
+		clean();
     }
 
 	void clean() {
@@ -126,7 +133,7 @@ public:
 	}
 
 private:
-	int iSize;
+	int iSize, iWindowSize;
 	int iStep;
 	float fScalingFactor;
 	int *vecData;
