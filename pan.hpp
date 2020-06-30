@@ -275,8 +275,8 @@ public:
 	void update_data(float r, float pdist, float eardist, float a0, float rel_delay) {
 		if (r == 0) r = 0.01f;
 		// Define angles
-		if (pdist > 2 * r) pdist = r;
-		float alpha = 2 * asin(pdist / (2.0 * r)); // Angle between two sources
+		// Angle between two sources
+		float alpha = (pdist > 2 * r) ? M_PI : (2 * asin(pdist / (2.0 * r)));
 		// float alpha0 = 0.f; // Initial angle of center [rad] (center = 0, right > 0)
 		float alpha_p[CHANNELS]; // Angle of individual sources [rad] (center = 0, right > 0)
 
